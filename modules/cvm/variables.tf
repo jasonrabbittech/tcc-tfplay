@@ -29,7 +29,7 @@ variable "image_id" {
 variable "image_name_regex" {
   description = "镜像名称匹配规则（image_id 为空时使用）"
   type        = string
-  default     = "^TencentOS Server 3.1"
+  default     = "^TencentOS Server 3"
 }
 
 variable "system_disk_type" {

@@ -1,6 +1,7 @@
 data "tencentcloud_images" "default" {
   image_type       = ["PUBLIC_IMAGE"]
   image_name_regex = var.image_name_regex
+  instance_type    = var.instance_type
 }
 
 resource "tencentcloud_instance" "this" {

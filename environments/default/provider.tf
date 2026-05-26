@@ -10,7 +10,7 @@ terraform {
 
   backend "cos" {
     region = "ap-hongkong"
-    bucket = "REPLACE_BUCKET-1250000000"
+    bucket = "tfstate-tcctfplay-1328140161"
     prefix = "terraform/default"
   }
 }

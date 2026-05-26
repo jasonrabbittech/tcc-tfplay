@@ -2,4 +2,4 @@ region            = "ap-hongkong"
 availability_zone = "ap-hongkong-2"
 name_prefix       = "demo"
 
-cos_bucket_name = "demo-app-1250000000"
+cos_bucket_name = "tfplay-app-1328140161"

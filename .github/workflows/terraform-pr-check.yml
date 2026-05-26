@@ -21,6 +21,7 @@ jobs:
         working-directory: ./environments/default
 
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
       TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
       TF_VAR_cos_bucket_name: ${{ vars.COS_BUCKET_NAME }}
@@ -28,7 +29,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -54,7 +55,7 @@ jobs:
         continue-on-error: true
 
       - name: Comment Plan on PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:

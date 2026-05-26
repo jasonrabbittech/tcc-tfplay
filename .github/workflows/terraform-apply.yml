@@ -22,6 +22,7 @@ jobs:
         working-directory: ./environments/default
 
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
       TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
       TF_VAR_cos_bucket_name: ${{ vars.COS_BUCKET_NAME }}
@@ -29,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3

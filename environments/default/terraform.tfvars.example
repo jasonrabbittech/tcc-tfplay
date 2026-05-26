@@ -1,0 +1,5 @@
+region            = "ap-hongkong"
+availability_zone = "ap-hongkong-2"
+name_prefix       = "demo"
+
+cos_bucket_name = "demo-app-1250000000"

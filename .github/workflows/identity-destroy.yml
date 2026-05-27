@@ -1,0 +1,60 @@
+name: Identity Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy-identity" to confirm you really want to revoke the role assignment and delete the role configuration'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Confirm input
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation string
+        run: |
+          if [ "${{ inputs.confirm }}" != "destroy-identity" ]; then
+            echo "::error::You must type 'destroy-identity' (lowercase, exact) in the confirm input."
+            exit 1
+          fi
+
+  terraform:
+    name: Identity Center Destroy
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: identity-production
+
+    defaults:
+      run:
+        working-directory: ./environments/identity
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+      TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
+      TF_VAR_zone_id: ${{ vars.IDENTITY_ZONE_ID }}
+      TF_VAR_principal_id: ${{ vars.IDENTITY_PRINCIPAL_ID }}
+      TF_VAR_target_uin: ${{ vars.IDENTITY_TARGET_UIN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan (destroy)
+        run: terraform plan -destroy -out=tfplan -input=false
+
+      - name: Terraform Destroy
+        run: terraform apply -auto-approve -input=false tfplan

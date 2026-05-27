@@ -1,0 +1,48 @@
+name: Identity Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'environments/identity/**'
+      - '.github/workflows/identity-apply.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Identity Center Apply
+    runs-on: ubuntu-latest
+    environment: identity-production
+
+    defaults:
+      run:
+        working-directory: ./environments/identity
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      TENCENTCLOUD_SECRET_ID: ${{ secrets.TENCENTCLOUD_SECRET_ID }}
+      TENCENTCLOUD_SECRET_KEY: ${{ secrets.TENCENTCLOUD_SECRET_KEY }}
+      TF_VAR_zone_id: ${{ vars.IDENTITY_ZONE_ID }}
+      TF_VAR_principal_id: ${{ vars.IDENTITY_PRINCIPAL_ID }}
+      TF_VAR_target_uin: ${{ vars.IDENTITY_TARGET_UIN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan -input=false
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false tfplan

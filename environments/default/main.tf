@@ -14,29 +14,26 @@ module "security_group" {
   source = "../../modules/security_group"
 
   name        = "${var.name_prefix}-sg"
-  description = "Demo security group managed by Terraform"
+  description = "Strict SG: ingress closed, egress allows only ICMP + DNS"
 
-  ingress_rules = [
+  # 入向全关：不允许任何入站连接
+  ingress_rules = []
+
+  # 出向最小化：只允许 ICMP（ping）和 UDP/53（DNS 解析）
+  egress_rules = [
     {
       action      = "ACCEPT"
       cidr_block  = "0.0.0.0/0"
-      protocol    = "TCP"
-      port        = "22"
-      description = "Allow SSH"
-    },
-    {
-      action      = "ACCEPT"
-      cidr_block  = "0.0.0.0/0"
-      protocol    = "TCP"
-      port        = "80"
-      description = "Allow HTTP"
-    },
-    {
-      action      = "ACCEPT"
-      cidr_block  = "10.0.0.0/16"
-      protocol    = "ALL"
+      protocol    = "ICMP"
       port        = "ALL"
-      description = "Allow intra-VPC"
+      description = "Allow outbound ping (ICMP)"
+    },
+    {
+      action      = "ACCEPT"
+      cidr_block  = "0.0.0.0/0"
+      protocol    = "UDP"
+      port        = "53"
+      description = "Allow outbound DNS"
     }
   ]
 
@@ -49,7 +46,7 @@ module "cvm" {
   instance_name      = "${var.name_prefix}-cvm"
   hostname           = "${var.name_prefix}-cvm"
   availability_zone  = var.availability_zone
-  instance_type      = "S5.MEDIUM2"
+  instance_type      = "SA2.SMALL1"
   vpc_id             = module.vpc.vpc_id
   subnet_id          = module.vpc.subnet_id
   security_group_ids = [module.security_group.security_group_id]
@@ -62,9 +59,10 @@ module "cvm" {
 module "cos" {
   source = "../../modules/cos"
 
-  bucket_name       = var.cos_bucket_name
-  acl               = "private"
-  versioning_enable = true
+  bucket_name          = var.cos_bucket_name
+  acl                  = "private"
+  versioning_enable    = true
+  encryption_algorithm = "AES256" # SSE-COS
 
   tags = var.tags
 }

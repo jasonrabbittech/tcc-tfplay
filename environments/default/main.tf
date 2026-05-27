@@ -46,7 +46,7 @@ module "cvm" {
   instance_name      = "${var.name_prefix}-cvm"
   hostname           = "${var.name_prefix}-cvm"
   availability_zone  = var.availability_zone
-  instance_type      = "SA2.SMALL1"
+  instance_type      = "SA2.MEDIUM2"
   vpc_id             = module.vpc.vpc_id
   subnet_id          = module.vpc.subnet_id
   security_group_ids = [module.security_group.security_group_id]

@@ -1,103 +1,254 @@
 # Tencent Cloud Terraform GitOps Demo
 
-基于 GitHub Actions 的腾讯云 Terraform CI/CD pipeline，参考腾讯云官方 [gitops-terraform](https://github.com/tencentcloudstack/gitops-terraform) 风格组织，演示 VPC / Subnet / Security Group / CVM / COS 五类基础资源的全自动创建与变更管理。
+GitHub Actions + Terraform CI/CD pipeline for Tencent Cloud, organized in the style of the official [gitops-terraform](https://github.com/tencentcloudstack/gitops-terraform) reference. Two independent stacks demonstrate end-to-end GitOps:
 
-## 目录结构
+- **`environments/default`** — VPC / Subnet / Security Group / CVM / EIP / COS resource provisioning.
+- **`environments/identity`** — Identity Center (SSO) role configuration, policy attachments, and member-account role assignments.
+
+Each stack has its own state, its own approval gate, and its own apply / destroy workflows.
+
+---
+
+## Table of contents
+
+- [Repository layout](#repository-layout)
+- [Workflows](#workflows)
+- [One-time setup](#one-time-setup)
+- [Day-to-day usage](#day-to-day-usage)
+- [Default stack — what it provisions](#default-stack--what-it-provisions)
+- [Identity stack — what it provisions](#identity-stack--what-it-provisions)
+- [Local debugging](#local-debugging)
+- [Security notes](#security-notes)
+- [Cross-account reuse](#cross-account-reuse)
+
+---
+
+## Repository layout
 
 ```
 .
 ├── .github/
 │   └── workflows/
-│       ├── terraform-pr-check.yml   # PR 触发：fmt + init + validate + plan，结果回评 PR
-│       └── terraform-apply.yml      # 合并到 main 触发：init + plan + apply（需 Environment 审批）
+│       ├── terraform-pr-check.yml      # PR check: fmt + init + validate + plan, comments on PR
+│       ├── terraform-apply.yml         # Push to main: apply default stack (production approval)
+│       ├── terraform-destroy.yml       # Manual: destroy default stack (typed confirmation + approval)
+│       ├── identity-apply.yml          # Push to main: apply identity stack (identity-production approval)
+│       └── identity-destroy.yml        # Manual: destroy identity stack (typed confirmation + approval)
 ├── environments/
-│   └── default/                     # 单环境根模块（先简单起步）
-│       ├── provider.tf              # provider + COS backend
+│   ├── default/                        # Compute / network / storage stack
+│   │   ├── provider.tf                 # provider + COS backend (prefix: terraform/default)
+│   │   ├── variables.tf
+│   │   ├── main.tf                     # Wires up modules/*
+│   │   └── outputs.tf
+│   └── identity/                       # IAM (Identity Center) stack
+│       ├── provider.tf                 # COS backend (prefix: terraform/identity)
 │       ├── variables.tf
-│       ├── main.tf                  # 引用 modules/*
-│       ├── outputs.tf
-│       └── terraform.tfvars.example
+│       ├── main.tf                     # SSO role configuration + policies + assignment
+│       └── outputs.tf
 ├── modules/
-│   ├── vpc/                         # VPC + Subnet
-│   ├── security_group/              # 安全组 + 规则集
-│   ├── cvm/                         # CVM 实例（自动取最新 TencentOS 镜像）
-│   └── cos/                         # COS Bucket
+│   ├── vpc/                            # VPC + Subnet
+│   ├── security_group/                 # Security Group + Rule Set
+│   ├── cvm/                            # CVM instance (auto-picks latest TencentOS image)
+│   └── cos/                            # COS bucket (with SSE-COS encryption)
 ├── .gitignore
 └── README.md
 ```
 
-## 一次性准备
+---
 
-### 1. 创建 COS Bucket 作为 Terraform Backend
+## Workflows
 
-在腾讯云控制台或 CLI 创建一个独立的 COS Bucket 用于存储 state（**不要**和业务用的 COS 复用）：
+| Workflow | Trigger | Acts on | Approval | Purpose |
+|---|---|---|---|---|
+| `terraform-pr-check.yml` | Pull request | Read-only | None | fmt + init + validate + plan, posts plan diff back to PR |
+| `terraform-apply.yml` | Push to `main` (paths: `environments/default/**`, `modules/**`) | `environments/default` | `production` env | Apply default stack |
+| `terraform-destroy.yml` | Manual `workflow_dispatch` (must type `destroy`) | `environments/default` | `production` env | Destroy default stack |
+| `identity-apply.yml` | Push to `main` (paths: `environments/identity/**`) | `environments/identity` | `identity-production` env | Apply identity stack |
+| `identity-destroy.yml` | Manual `workflow_dispatch` (must type `destroy-identity`) | `environments/identity` | `identity-production` env | Destroy identity stack |
 
-```bash
-# 区域：ap-hongkong
-# Bucket 名称：tfstate-<your-name>-<appid>
-# 务必开启版本控制
-```
+The two stacks are intentionally split:
 
-然后修改 `environments/default/provider.tf` 中的 `bucket` 字段为实际名称。
+- IAM changes (identity stack) and infrastructure changes (default stack) have different blast radius and different reviewers.
+- A bug or rollback in one stack does not affect the other.
+- Each stack writes to a separate state prefix in the same COS bucket.
 
-### 2. 在 GitHub 仓库配置 Secrets / Variables
+---
+
+## One-time setup
+
+### 1. Create a state-backend COS bucket
+
+Both stacks share one bucket with different prefixes. Manually create a private bucket in `ap-hongkong` (or your chosen region) **with versioning enabled**, e.g. `tfstate-tcctfplay-1328140161`.
+
+Then update the `bucket` field in:
+
+- `environments/default/provider.tf`
+- `environments/identity/provider.tf`
+
+> Terraform's `backend` block does not support variable interpolation, so the bucket name must be hard-coded per environment file.
+
+### 2. Configure GitHub Secrets and Variables
 
 **Settings → Secrets and variables → Actions**
 
-| 类型 | 名称 | 说明 |
-|------|------|------|
-| Secret | `TENCENTCLOUD_SECRET_ID` | 腾讯云 API 密钥 ID |
-| Secret | `TENCENTCLOUD_SECRET_KEY` | 腾讯云 API 密钥 Key |
-| Secret | `CVM_PASSWORD` | CVM 登录密码（≥12 位，含大小写+数字+特殊字符） |
-| Variable | `COS_BUCKET_NAME` | 业务用 COS Bucket 名称，例如 `demo-app-1250000000` |
+#### Repo-level Secrets (used by both stacks)
 
-### 3. 配置 Production Environment（用于人工审批）
+| Name | Value |
+|---|---|
+| `TENCENTCLOUD_SECRET_ID` | API SecretId. For the identity stack, this MUST be a master-account credential with Identity Center management permission. |
+| `TENCENTCLOUD_SECRET_KEY` | API SecretKey. |
+| `CVM_PASSWORD` | CVM login password. 8–30 chars, must include at least 3 of: lowercase / uppercase / digit / special character. |
 
-**Settings → Environments → New environment → 命名为 `production`**
+#### Repo-level Variables (default stack)
 
-启用 **Required reviewers**，添加你自己作为审批人。Apply workflow 触发后会暂停等待审批。
+| Name | Example | Notes |
+|---|---|---|
+| `COS_BUCKET_NAME` | `tfplay-demo-1328140161` | Application bucket name, must end with your APPID. Globally unique. |
 
-## 使用方式
+#### Repo-level Variables (identity stack)
 
-### PR 流程（推荐）
+| Name | Example | Notes |
+|---|---|---|
+| `IDENTITY_ZONE_ID` | `z-71c8dwf2w3q3` | Identity Center instance zone id. |
+| `IDENTITY_PRINCIPAL_ID` | `u-2jt99e06qde1` | SSO user id to be granted the role. |
+| `IDENTITY_TARGET_UIN` | `200048944863` | Member account UIN where the role applies. |
+
+### 3. Create GitHub Environments
+
+**Settings → Environments**
+
+Create two environments:
+
+| Environment | Used by | Suggested reviewers |
+|---|---|---|
+| `production` | default stack apply / destroy | You |
+| `identity-production` | identity stack apply / destroy | You + a security reviewer |
+
+For each environment, enable **Required reviewers** so apply / destroy pauses for manual approval.
+
+---
+
+## Day-to-day usage
+
+### Recommended PR flow (default stack)
 
 ```bash
-git checkout -b feature/add-cvm
-# 修改代码
-git commit -am "add cvm"
-git push origin feature/add-cvm
-# 在 GitHub 上发起 PR
+git checkout -b feature/add-resource
+# edit code under environments/default or modules/
+git commit -am "feat: add resource"
+git push origin feature/add-resource
+# open a PR
 ```
 
-PR 创建后自动触发 `terraform-pr-check`，plan 结果会以 comment 形式贴在 PR 上。Review 通过后合并到 main，自动触发 `terraform-apply`，等待 production environment 审批通过后执行 apply。
+The `terraform-pr-check` workflow runs automatically and posts the plan diff as a PR comment. After review and merge to `main`, `terraform-apply.yml` triggers, waits for `production` approval, and runs apply.
 
-### 本地调试
+### Identity stack changes
+
+Edit anything under `environments/identity/`, push to `main`. `identity-apply.yml` triggers, waits for `identity-production` approval, then runs apply.
+
+### Destroying a stack
+
+Both destroy workflows are **manual** with double confirmation:
+
+| Stack | Workflow | Confirmation string |
+|---|---|---|
+| default | `Terraform Destroy` | `destroy` |
+| identity | `Identity Destroy` | `destroy-identity` |
+
+In the GitHub UI: **Actions → select destroy workflow → Run workflow → enter the confirmation string → approve in the environment gate**.
+
+---
+
+## Default stack — what it provisions
+
+A minimal demo footprint in `ap-hongkong`:
+
+| # | Resource | Name | Key attributes |
+|---|---|---|---|
+| 1 | VPC | `demo-vpc` | `10.0.0.0/16` |
+| 2 | Subnet | `demo-subnet` | `10.0.1.0/24` in `ap-hongkong-2` |
+| 3 | Security Group | `demo-sg` | Ingress: deny all (no rules) |
+| 4 | SG Rule Set | derived | Egress: ICMP + UDP/53 only (allows `ping` + DNS lookup) |
+| 5 | EIP | auto-attached | 5 Mbps cap, public IP |
+| 6 | CVM | `demo-cvm` | `SA2.MEDIUM2` (2C2G), TencentOS Server 3.x |
+| 7 | System disk | implicit | 50 GB `CLOUD_PREMIUM` |
+| 8 | COS Bucket | `${COS_BUCKET_NAME}` | Private + Versioning + SSE-COS (AES256) |
+
+Default tags are intentionally empty (`{}`) to avoid Tencent Cloud reserved tag prefix conflicts (`cos:`, `qcs:`, etc.). To re-enable tags, use lowercase keys with no colons.
+
+---
+
+## Identity stack — what it provisions
+
+In the master account's Identity Center:
+
+| # | Resource | Purpose |
+|---|---|---|
+| 1 | `tencentcloud_identity_center_role_configuration` | Creates a role configuration named `cdb_admin` |
+| 2 | `..._permission_policy_attachment` | Attaches a pre-defined policy (e.g. `219185po` = QcloudCDBFullAccess) |
+| 3 | `..._permission_custom_policy_attachment` | Attaches a custom policy `vpc-admin` granting `vpc:*` |
+| 4 | `tencentcloud_identity_center_role_assignment` | Assigns the role to a SSO user, scoped to a member account |
+
+All sensitive identifiers (`zone_id`, `principal_id`, `target_uin`) are injected via GitHub Variables — nothing is hard-coded.
+
+---
+
+## Local debugging
+
+For one-off ad-hoc debugging only. Production changes always go through the pipeline.
 
 ```bash
+# Default stack
 cd environments/default
-cp terraform.tfvars.example terraform.tfvars   # 按需修改
 
 export TENCENTCLOUD_SECRET_ID=xxx
 export TENCENTCLOUD_SECRET_KEY=xxx
 export TF_VAR_cvm_password='YourStrong#Passwd1'
+export TF_VAR_cos_bucket_name='tfplay-demo-1328140161'
 
 terraform init
 terraform plan
-terraform apply
+# Avoid running terraform apply locally — it bypasses the production approval gate.
 ```
 
-## 资源说明
+```bash
+# Identity stack
+cd environments/identity
 
-| 模块 | 资源 | 说明 |
-|------|------|------|
-| `vpc` | `tencentcloud_vpc`, `tencentcloud_subnet` | 默认 10.0.0.0/16，子网 10.0.1.0/24 |
-| `security_group` | `tencentcloud_security_group`, `tencentcloud_security_group_rule_set` | 默认放通 22/80 入站、全部出站 |
-| `cvm` | `tencentcloud_instance` + `data.tencentcloud_images` | 默认 S5.MEDIUM2 + TencentOS Server 3.1 + 50G 高性能云盘 |
-| `cos` | `tencentcloud_cos_bucket` | 默认 private + 开启版本控制 |
+export TENCENTCLOUD_SECRET_ID=xxx     # master account
+export TENCENTCLOUD_SECRET_KEY=xxx
+export TF_VAR_zone_id=z-xxxxxxxx
+export TF_VAR_principal_id=u-xxxxxxxx
+export TF_VAR_target_uin=2000xxxxxxxx
 
-## 安全提醒
+terraform init
+terraform plan
+```
 
-- `terraform.tfvars` 已加入 `.gitignore`，**绝不要**把它提交到仓库
-- `CVM_PASSWORD` 只通过 GitHub Secret + `TF_VAR_*` 环境变量注入，不进 state 以外的任何文件
-- COS backend Bucket 务必开启版本控制，state 损坏时可回滚
-- 生产环境建议把 CVM 密码登录改为 `tencentcloud_key_pair` 密钥对登录
+---
+
+## Security notes
+
+- **Never commit credentials.** No `secret_id` / `secret_key` in any `.tf` file. They flow only through GitHub Secrets → environment variables.
+- **State backend versioning is mandatory** so a corrupt state can be rolled back.
+- **State backend uses SSE-COS by default** (configured at the bucket level when you create it).
+- **Terraform state contains sensitive values** (e.g. CVM password) — keep state-bucket access restricted to the CI runner.
+- **Identity stack must use a master-account credential** with Identity Center permissions. Default stack can use a member-account credential with least-privilege scope.
+- **Reserved tag prefixes**: Tencent Cloud rejects tag keys with prefixes like `cos:`, `qcs:`, `tke:`, `cls:`, `cdb:`. Use lowercase keys without colons (e.g. `project`, `managed-by`).
+- **For production**: replace CVM password login with `tencentcloud_key_pair` (key-pair login). Password auth should not survive past demo phase.
+
+---
+
+## Cross-account reuse
+
+To reuse this repo against another Tencent Cloud account without forking:
+
+1. Create a new state bucket in the target account (with that account's APPID suffix).
+2. Update the `bucket` value in `environments/default/provider.tf` and / or `environments/identity/provider.tf`.
+3. Add a new GitHub Environment (e.g. `account-b-production`) with reviewers and per-environment Secrets:
+   - `TENCENTCLOUD_SECRET_ID` (account B credential)
+   - `TENCENTCLOUD_SECRET_KEY`
+   - etc.
+4. Create a copy of the workflow that points to the new environment, or extend the workflow with a `workflow_dispatch` `environment` input.
+
+For a more scalable pattern, copy `environments/default/` to `environments/account-b/` with its own `provider.tf` and `terraform.tfvars`, and parameterize the workflows by environment.

@@ -76,9 +76,14 @@ The two stacks are intentionally split:
 
 ## One-time setup
 
-### 1. Create a state-backend COS bucket
+### 1. Create state-backend COS buckets
 
-Both stacks share one bucket with different prefixes. Manually create a private bucket in `ap-hongkong` (or your chosen region) **with versioning enabled**, e.g. `tfstate-tcctfplay-1328140161`.
+Each stack uses its own bucket, both in the **master Tencent Cloud account** so a single set of credentials works for everything. Manually create two private buckets in `ap-hongkong` **with versioning enabled and SSE-COS encryption**:
+
+| Bucket | Used by | State prefix |
+|---|---|---|
+| `tfstate-tcctfplay-default-<MASTER_APPID>` | default stack | `terraform/default` |
+| `tfstate-tcctfplay-identity-<MASTER_APPID>` | identity stack | `terraform/identity` |
 
 Then update the `bucket` field in:
 
@@ -93,17 +98,17 @@ Then update the `bucket` field in:
 
 #### Repo-level Secrets (used by both stacks)
 
+Both stacks share one set of master-account credentials. The master account owns all state buckets, the Identity Center instance, and (in this demo) the default stack resources too. If you ever split stacks across multiple accounts, split the Secrets per stack as well.
+
 | Name | Value |
 |---|---|
-| `TENCENTCLOUD_SECRET_ID` | API SecretId. For the identity stack, this MUST be a master-account credential with Identity Center management permission. |
-| `TENCENTCLOUD_SECRET_KEY` | API SecretKey. |
+| `TENCENTCLOUD_SECRET_ID` | Master-account API SecretId. Needs both Identity Center management permission and access to the state buckets. |
+| `TENCENTCLOUD_SECRET_KEY` | Master-account API SecretKey. |
 | `CVM_PASSWORD` | CVM login password. 8–30 chars, must include at least 3 of: lowercase / uppercase / digit / special character. |
 
 #### Repo-level Variables (default stack)
 
-| Name | Example | Notes |
-|---|---|---|
-| `COS_BUCKET_NAME` | `tfplay-demo-1328140161` | Application bucket name, must end with your APPID. Globally unique. |
+`COS_BUCKET_NAME` is no longer required. The bucket name is auto-derived from `name_prefix` and the master account's APPID via the `tencentcloud_user_info` data source. To override (e.g. provide a longer custom name), pass `TF_VAR_cos_bucket_name`.
 
 #### Repo-level Variables (identity stack)
 
@@ -204,7 +209,8 @@ cd environments/default
 export TENCENTCLOUD_SECRET_ID=xxx
 export TENCENTCLOUD_SECRET_KEY=xxx
 export TF_VAR_cvm_password='YourStrong#Passwd1'
-export TF_VAR_cos_bucket_name='tfplay-demo-1328140161'
+# Optional override; leave unset to auto-derive as ${name_prefix}-app-<APPID>
+# export TF_VAR_cos_bucket_name='tfplay-demo-1426280973'
 
 terraform init
 terraform plan

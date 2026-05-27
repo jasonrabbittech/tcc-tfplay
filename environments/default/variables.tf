@@ -17,8 +17,9 @@ variable "name_prefix" {
 }
 
 variable "cos_bucket_name" {
-  description = "COS Bucket 名称，必须带 APPID 后缀，例如 demo-app-1250000000"
+  description = "COS Bucket 名称（可选）。留空则自动拼接为 <name_prefix>-app-<APPID>，APPID 由 tencentcloud_user_info 自动查询。如需自定义请确保以 -<APPID> 结尾。"
   type        = string
+  default     = null
 }
 
 variable "cvm_password" {

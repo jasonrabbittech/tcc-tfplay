@@ -28,6 +28,11 @@ output "cvm_private_ip" {
   value       = module.cvm.private_ip
 }
 
+output "cos_bucket_name" {
+  description = "COS Bucket 名称（自动拼接：<name_prefix>-app-<APPID>）"
+  value       = local.cos_bucket_name
+}
+
 output "cos_bucket_url" {
   description = "COS Bucket 访问域名"
   value       = module.cos.bucket_url

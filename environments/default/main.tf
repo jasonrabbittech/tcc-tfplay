@@ -1,3 +1,11 @@
+# 自动查当前凭证所属账号的 APPID，用于拼接 COS 桶名（COS bucket 名必须以 -<APPID> 结尾）
+data "tencentcloud_user_info" "current" {}
+
+locals {
+  app_id          = data.tencentcloud_user_info.current.app_id
+  cos_bucket_name = coalesce(var.cos_bucket_name, "${var.name_prefix}-app-${local.app_id}")
+}
+
 module "vpc" {
   source = "../../modules/vpc"
 
@@ -59,7 +67,7 @@ module "cvm" {
 module "cos" {
   source = "../../modules/cos"
 
-  bucket_name          = var.cos_bucket_name
+  bucket_name          = local.cos_bucket_name
   acl                  = "private"
   versioning_enable    = true
   encryption_algorithm = "AES256" # SSE-COS

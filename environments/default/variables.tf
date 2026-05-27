@@ -28,10 +28,7 @@ variable "cvm_password" {
 }
 
 variable "tags" {
-  description = "通用资源标签"
+  description = "通用资源标签（腾讯云有保留 tag 前缀 cos:/qcs:/tke:，先留空，验证资源能起来再加）"
   type        = map(string)
-  default = {
-    Project   = "tf-demo"
-    ManagedBy = "Terraform"
-  }
+  default     = {}
 }
